@@ -72,6 +72,7 @@ REPO_TOOLING_MODULES = frozenset(
         "test_support_claims.py",
         "test_verify_dist.py",
         "test_bench_artifact.py",
+        "test_bench_dialect_baseline.py",
         "test_check_agents_docs.py",
         "test_check_docs_links.py",
         "test_agent_review_gate.py",
