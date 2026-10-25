@@ -1,10 +1,21 @@
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
-from scripts import bench_dialect_baseline as bdb
 
 
-def test_summary_returns_expected_statistics() -> None:
+@pytest.fixture
+def bdb() -> Any:
+    # The script imports pycubrid at module level; the repo/offline lanes do
+    # not install the pycubrid extra (same pattern as test_bench_artifact.py).
+    pytest.importorskip("pycubrid")
+    from scripts import bench_dialect_baseline
+
+    return bench_dialect_baseline
+
+
+def test_summary_returns_expected_statistics(bdb: Any) -> None:
     values = [10.0, 20.0, 30.0]
 
     result = bdb.summary(values)
@@ -17,7 +28,7 @@ def test_summary_returns_expected_statistics() -> None:
     assert result["trials"] == values
 
 
-def test_summary_handles_single_value() -> None:
+def test_summary_handles_single_value(bdb: Any) -> None:
     values = [42.0]
 
     result = bdb.summary(values)
@@ -30,7 +41,7 @@ def test_summary_handles_single_value() -> None:
     assert result["trials"] == values
 
 
-def test_us_converts_median_nanoseconds_to_microseconds() -> None:
+def test_us_converts_median_nanoseconds_to_microseconds(bdb: Any) -> None:
     assert bdb.us([1000, 2000, 3000]) == 2.0
 
 
@@ -43,6 +54,7 @@ def test_us_converts_median_nanoseconds_to_microseconds() -> None:
     ],
 )
 def test_rotate_moves_items_by_trial(
+    bdb: Any,
     items: list[str],
     trial: int,
     expected: list[str],
