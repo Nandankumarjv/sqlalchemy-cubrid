@@ -43,7 +43,7 @@ owns supported versions and driver status.
 ```bash
 git clone https://github.com/cubrid-lab/sqlalchemy-cubrid.git
 cd sqlalchemy-cubrid
-make install          # pip install -e . --group dev (PEP 735 groups, pip >= 25.1) + pre-commit hooks
+make install          # pip install -e ".[pycubrid]" --group dev (PEP 735 groups, pip >= 25.1) + pre-commit hooks
 ```
 
 ### Key Commands
@@ -58,7 +58,7 @@ make format-check     # ruff format --check (never modifies files)
 make format           # Auto-fix lint/format (the only mutating target)
 make typecheck        # mypy
 make check            # lint + format-check + typecheck + security + check-docs-reason
-make verify           # check + test (no Docker)
+make verify           # check, test, then the live integration lane (Docker)
 make integration      # Run-owned Docker project → integration tests → cleanup (INTEGRATION_DRIVER=pycubrid|cubriddb)
 make integration-local # Integration tests against an already-running CUBRID (set CUBRID_TEST_URL)
 make test-all         # tox (envlist in tox.ini)
