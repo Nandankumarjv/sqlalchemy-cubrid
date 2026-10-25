@@ -1,7 +1,8 @@
 """Makefile target semantics (#1009).
 
 ``make test`` is the complete offline suite, ``make check`` the complete non-test
-quality gate, ``make verify`` both without Docker, and only ``make format``
+quality gate, ``make verify`` those two and then the live ``make integration`` lane
+(#1018), and only ``make format``
 modifies files. ``make docker-down`` keeps the local test data and only
 ``make docker-clean`` deletes it (#1008). Most checks use ``make -n`` (print, do not run); the ``doctor`` and
 ``check-all`` checks run the targets with every tool replaced by ``true`` or
@@ -15,7 +16,10 @@ import os
 from pathlib import Path
 import re
 import shutil
+import signal
+import time
 import subprocess
+import sys
 
 import pytest
 import yaml
@@ -115,11 +119,115 @@ def test_check_is_the_complete_non_test_quality_gate():
     assert not any("pytest" in line or "docker" in line for line in lines)
 
 
-def test_verify_is_check_and_test_without_docker():
-    assert _prerequisites("verify") == ["check", "test"]
-    lines = _dry_run("verify")
+def _results(tmp_path):
+    """Result directories under tmp_path, so a verify run never touches test-results/."""
+    return [
+        f"TEST_RESULTS={tmp_path}/test",
+        f"INTEGRATION_RESULTS={tmp_path}/integration",
+        f"VERIFY_RESULTS={tmp_path}/verify",
+    ]
+
+
+def _verify_stub(tmp_path, *, fail="", block=""):
+    """A PYTHON that logs every call and runs the real verify runner.
+
+    The offline pytest run fails when *fail* is ``"test"``; the live runner blocks until
+    SIGTERM when *block* is ``"integration"`` and logs that it was terminated.
+    """
+    log = tmp_path / "python.log"
+    stub = tmp_path / "python"
+    script = (
+        f'#!/bin/sh\nprintf "%s\\n" "$*" >> "{log}"\n'
+        f'case " $* " in *" scripts/run_verify.py "*) exec "{sys.executable}" "$@" ;; esac\n'
+    )
+    if fail == "test":
+        script += 'case " $* " in *" -m pytest "*"not integration"*) exit 1 ;; esac\n'
+    if block == "integration":
+        script += (
+            'case " $* " in *" scripts/run_integration.py "*)\n'
+            "  sleep 30 & pid=$!\n"
+            f"  trap 'kill $pid; echo TERMINATED >> \"{log}\"; exit 143' TERM\n"
+            f'  echo BLOCKING >> "{log}"\n'
+            "  wait $pid; exit 0 ;;\nesac\n"
+        )
+    stub.write_text(script + "exit 0\n")
+    stub.chmod(0o755)
+    return stub, log
+
+
+def _verify_summary(tmp_path):
+    summary = json.loads((tmp_path / "verify" / "summary.json").read_text(encoding="utf-8"))
+    return summary["status"], {phase["name"]: phase["status"] for phase in summary["phases"]}
+
+
+def test_verify_execs_the_runner_and_a_dry_run_writes_nothing(tmp_path):
+    # Not prerequisites, so `make -j` cannot start a later phase early.
+    assert _prerequisites("verify") == []
+    lines = _dry_run("verify", *_results(tmp_path))
+    assert any(line.startswith("exec python3 scripts/run_verify.py --make ") for line in lines)
+    assert not any("run_integration" in line or "-m pytest" in line for line in lines)
+    assert not list(tmp_path.iterdir())
+
+
+def test_verify_runs_check_then_test_then_the_live_lane(tmp_path):
+    stub, log = _verify_stub(tmp_path)
+    # Pin the driver so an exported INTEGRATION_DRIVER=cubriddb cannot change the default.
+    _make("verify", f"PYTHON={stub}", "INTEGRATION_DRIVER=pycubrid", *_results(tmp_path))
+    calls = log.read_text().splitlines()
+    static = max(i for i, call in enumerate(calls) if " ruff " in call or " bandit " in call)
+    offline = next(i for i, call in enumerate(calls) if "not integration" in call)
+    live = next(i for i, call in enumerate(calls) if "scripts/run_integration.py" in call)
+    assert static < offline < live
+    assert "--driver=pycubrid" in calls[live]
+
+
+def test_test_stays_offline():
+    lines = _dry_run("test")
     assert not any("docker" in line or "run_integration" in line for line in lines)
-    assert any('-m "not integration"' in line for line in lines)
+
+
+@pytest.mark.parametrize("jobs", [[], ["-j3"]], ids=["serial", "parallel"])
+def test_verify_never_starts_the_live_lane_after_failing_offline_tests(tmp_path, jobs):
+    stub, log = _verify_stub(tmp_path, fail="test")
+    result = _make(*jobs, "verify", f"PYTHON={stub}", *_results(tmp_path))
+    assert result.returncode != 0
+    calls = log.read_text().splitlines()
+    assert any("-m pytest" in call for call in calls)
+    assert not any("scripts/run_integration.py" in call for call in calls)
+    # The summary records the failed offline phase and the live lane that never ran.
+    assert _verify_summary(tmp_path) == (
+        "FAIL",
+        {"check": "PASS", "test": "FAIL", "integration": "NOT_RUN"},
+    )
+
+
+def test_verify_forwards_sigterm_to_the_live_lane_and_still_writes_the_summary(tmp_path):
+    # `timeout make verify` and `kill <make pid>` signal only make, which forwards SIGTERM
+    # to the runner; the runner must stop the live lane (which then cleans up), not orphan it.
+    make = shutil.which("make")
+    if make is None:
+        pytest.skip("make is required for Makefile regression tests")
+    stub, log = _verify_stub(tmp_path, block="integration")
+    env = {k: v for k, v in os.environ.items() if k not in {"MAKEFLAGS", "MFLAGS", "MAKELEVEL"}}
+    process = subprocess.Popen(
+        [make, "--no-print-directory", "verify", f"PYTHON={stub}", *_results(tmp_path)],
+        cwd=ROOT,
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    deadline = time.monotonic() + 30
+    while "BLOCKING" not in (log.read_text() if log.exists() else ""):
+        assert process.poll() is None and time.monotonic() < deadline, "live lane never started"
+        time.sleep(0.05)
+    process.send_signal(signal.SIGTERM)
+    _, stderr = process.communicate(timeout=30)
+    assert process.returncode != 0
+    assert "TERMINATED" in log.read_text(), stderr
+    status, phases = _verify_summary(tmp_path)
+    assert status == "FAIL"
+    assert phases["integration"] == "FAIL"
 
 
 @pytest.mark.parametrize("target", ["clean", "clean-all"])

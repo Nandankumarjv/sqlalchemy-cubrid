@@ -45,7 +45,8 @@ make install
 
 `make install`이 수행하는 것:
 1. `pip install --upgrade "pip>=25.1"` — 의존성 그룹에는 pip 25.1 이상이 필요합니다
-2. `pip install -e . --group dev` — `dev` 의존성 그룹과 함께 편집 가능 설치
+2. `pip install -e ".[pycubrid]" --group dev` — `make verify`의 live 레인이 연결하는 `pycubrid`
+   드라이버와 `dev` 의존성 그룹을 포함한 편집 가능 설치
 3. `pre-commit install` — git 훅 설정
 
 기여자 도구는 게시되는 extra가 아니라 `pyproject.toml`의 `[dependency-groups]`
@@ -157,7 +158,7 @@ make format        # 린트 문제 자동 수정 및 코드 포맷 (파일을 �
 make test          # 모든 오프라인 테스트(빠른 테스트 + 저장소 도구 테스트)를 커버리지와 함께 실행 (95% 임계값)
 make test-fast     # 빠른 오프라인 테스트만 커버리지와 함께 실행
 make test-repo     # 저장소 도구 테스트 실행 (Makefile, 시그널 처리, 저장소 스크립트)
-make verify        # make check 후 make test 실행 (Docker 없음)
+make verify        # make check, make test, 이어서 live make integration 레인 (Docker 필요)
 make test-all      # 모든 Python 버전에서 tox 실행
 make integration   # 실행 전용 Docker 프로젝트 시작 → 통합 테스트 실행 (pycubrid) → 삭제
 make docker-up     # CUBRID 시작 (브로커는 127.0.0.1, 포트 CUBRID_TEST_PORT, 없으면 .env, 그다음 33000)
@@ -209,7 +210,7 @@ pytest test/ -v --ignore=test/test_integration.py --ignore=test/test_suite.py \
 pytest test/test_compiler.py -v
 
 # 단일 테스트 실행
-pytest test/test_compiler.py::TestCubridSQLCompiler::test_select_limit -v
+pytest test/test_compiler.py::TestSelectCompilation::test_select_limit -v
 ```
 
 ### 속성 기반 퍼즈 테스트 (Hypothesis)
@@ -605,15 +606,17 @@ CI는 `make test`를 실행하지 않습니다. 오프라인 레인(`ci.yml`의 
 실행하는 job(`ci.yml`의 `integration-tests`, `make-integration`, `integration-full.yml`의
 `integration-full`, `make-integration`)은 이미 기록하는 pytest 로그를 실패 시에도
 `pytest-logs-*` 아티팩트로 업로드합니다. 두 `make-integration` job은 같은 아티팩트에
-`test-results/integration/`(아래 라이브 결과)도 함께 올립니다. 라이브 레인의 job summary는
-아직 기록하지 않습니다.
+`test-results/integration/`(아래 라이브 결과)도 함께 올리고, 그 레인의 `summary.json` 줄을
+job summary에 덧붙입니다(`Publish live results summary`, 실패 시에도; 요약이 없으면 그렇다고
+표시).
 
 ### 라이브 결과 (`make integration`)
 
 `make integration`은 `INTEGRATION_RESULTS`(기본값 `test-results/integration/`, gitignore 대상,
-`make clean`으로 제거)에 다음 파일을 기록합니다(#1020). 디렉터리 이름은 `verify`가 아니라 레인
-이름인 `integration`입니다. 향후 라이브 `make verify`가 무엇을 실행할지는 아직 열린 결정(#1018)이라,
-`verify` 디렉터리는 존재하지 않는 집계를 암시하기 때문입니다.
+`make clean`으로 제거)에 다음 파일을 기록합니다(#1020). 디렉터리 이름은 레인
+이름인 `integration`입니다. `make verify`(#1018)는 `make check`, `make test`, 이어서 같은
+`make integration` 레인(기본 드라이버 `pycubrid`)을 실행하므로 이 파일도 여기에 기록하며, 자체 요약은
+`test-results/verify/`에 둡니다(아래).
 
 | 파일 | 내용 |
 |---|---|
@@ -633,10 +636,38 @@ pytest가 0으로 끝났지만 JUnit 파일이 없거나 선택된 테스트가 
 `CUBRID_PASSWORD`와 `CUBRID_TEST_URL`, `CUBRID_TEST_AURL`, `CUBRID_URL`의 비밀번호(퍼센트 인코딩과
 XML 이스케이프 형태 포함)를 `***`로 바꿉니다. `service.log`는 정리만 실패한 경우에도 수집하며,
 저장이 정리를 건너뛰게 하지 않습니다. 결과 디렉터리마다 한 번에 하나의 `make integration`만 실행하세요.
-`make integration-local`은 Docker 수명 주기를 실행하지 않으며 결과도 기록하지 않습니다. 향후 라이브
-`make verify`는 각 레인을 `test-results/verify/` 아래 별도 `INTEGRATION_RESULTS` 디렉터리로
-실행하고 레인별 `summary.json`을 집계할 것으로 예상됩니다(없거나 `PASS`가 아닌 레인이 있으면
-집계는 `INCOMPLETE` 또는 `FAIL`).
+`make integration-local`은 Docker 수명 주기를 실행하지 않으며 결과도 기록하지 않습니다. `make verify`는
+`make check`와 `make test`가 성공한 뒤에만 live 레인을 시작하며(`make -j`에서도 순차 sub-make),
+그 레인이 `PASS`가 아니면 실패합니다.
+
+### 검증 요약 (`make verify`)
+
+`make verify`는 먼저 `test-results/verify/`, `test-results/test/`, `test-results/integration/`을
+지운 뒤 `scripts/run_verify.py`를 `exec`합니다. 이 스크립트는 단계를 차례로 실행하고, 실패나 시그널
+뒤에도 항상 `test-results/verify/`를 기록합니다(#1020). 단계는 호출자의 프로세스 그룹에 남으므로
+Ctrl-C는 평소처럼 전달됩니다. make에만 보낸 SIGINT, SIGTERM, SIGHUP(`timeout make verify`,
+`kill <make pid>`)은 실행 중인 단계로 전달되어 `make integration`이 Compose 프로젝트를 정리하며,
+`make verify`는 다음 단계를 시작하지 않고 128 + 시그널 번호로 종료합니다.
+
+| 파일 | 내용 |
+|---|---|
+| `summary.json` | `schema_version`, `lane`(`verify`), 전체 `status`와 `problems`, 단계 순서(`check`, `test`, `integration`)대로의 `phases` 항목(각 `status`, `exit_code`, 읽은 레인 `summary`, 그 요약의 `summary_status`) |
+| `junit/test.xml`, `junit/integration.xml` | 실행되어 JUnit 파일을 쓴 레인의 JUnit 사본 |
+| `environment.json` | live 레인이 실행되어 기록한 `environment.json` 사본 |
+
+모든 사본에서 `CUBRID_PASSWORD`와 `CUBRID_TEST_URL`, `CUBRID_TEST_AURL`, `CUBRID_URL`의 비밀번호
+(퍼센트 인코딩과 XML 이스케이프 형태 포함)를 live 레인과 같이 `***`로 바꿉니다. 실패한 오프라인
+테스트가 JUnit 보고서에 이를 출력할 수 있기 때문입니다. 존재하지만 복사할 수 없는 결과 파일은
+제외되며 요약이 `PASS`가 되지 않게 합니다.
+
+단계는 종료 상태가 0이고 자체 `summary.json`(`test`, `integration`)이 `PASS`일 때만 `PASS`입니다.
+앞 단계가 실패해 시작하지 않은 단계는 `NOT_RUN`입니다. 전체 상태는 실패한 단계가 있으면 `FAIL`,
+실행되지 않은 단계가 있거나 요약이 없거나 읽을 수 없거나 레인이 아무것도 증명하지 못했거나 결과
+파일을 복사하지 못했으면
+`INCOMPLETE`, 모든 단계가 통과했을 때만 `PASS`입니다. 마지막 콘솔 줄이 이를 반복합니다(예:
+`verify: PASS; check PASS, test PASS, integration PASS -> test-results/verify/summary.json`).
+`make verify`는 처음 실패한 단계의 종료 상태를 유지하며 요약이 `PASS`가 아니면 0이 아닌 값으로
+끝납니다. 요약에는 명령, URL, 환경 변수를 기록하지 않으며 `make -n verify`는 아무것도 쓰지 않습니다.
 
 ### 알려진 도달 불가능 라인
 

@@ -1,5 +1,35 @@
 # Changelog
 
+## [1.12.0](https://github.com/cubrid-lab/sqlalchemy-cubrid/compare/v1.11.7...v1.12.0) (2026-10-25)
+
+
+### Added
+
+* **make:** run the live integration lane in make verify ([#1045](https://github.com/cubrid-lab/sqlalchemy-cubrid/issues/1045)) ([4d168ea](https://github.com/cubrid-lab/sqlalchemy-cubrid/commit/4d168eaf4b382841fe4880ba25db3f103319636d))
+* **make:** write a verification summary under test-results/verify ([#1047](https://github.com/cubrid-lab/sqlalchemy-cubrid/issues/1047)) ([ac596a5](https://github.com/cubrid-lab/sqlalchemy-cubrid/commit/ac596a54429da7c60a023de3a6bd9967216053c8))
+
+## [1.11.7](https://github.com/cubrid-lab/sqlalchemy-cubrid/compare/v1.11.6...v1.11.7) (2026-10-25)
+
+
+### Documentation
+
+* **agents:** remove agent-specific footer from commit example ([b51b29f](https://github.com/cubrid-lab/sqlalchemy-cubrid/commit/b51b29fa793d12d4ec54d9ef65adb3c43cd2ae5f))
+* **agents:** remove tool-specific commit footer ([#1043](https://github.com/cubrid-lab/sqlalchemy-cubrid/issues/1043)) ([b51b29f](https://github.com/cubrid-lab/sqlalchemy-cubrid/commit/b51b29fa793d12d4ec54d9ef65adb3c43cd2ae5f))
+
+## [1.11.6](https://github.com/cubrid-lab/sqlalchemy-cubrid/compare/v1.11.5...v1.11.6) (2026-10-24)
+
+
+### Documentation
+
+* **development:** fix stale pytest node ([#1034](https://github.com/cubrid-lab/sqlalchemy-cubrid/issues/1034)) ([003dca4](https://github.com/cubrid-lab/sqlalchemy-cubrid/commit/003dca4d9bf79aeb1d67814c5fa8e92824216405)), closes [#1033](https://github.com/cubrid-lab/sqlalchemy-cubrid/issues/1033)
+
+## [1.11.5](https://github.com/cubrid-lab/sqlalchemy-cubrid/compare/v1.11.4...v1.11.5) (2026-10-24)
+
+
+### CI
+
+* **release:** restart release preparation after the abandoned 1.11.4 ([#1037](https://github.com/cubrid-lab/sqlalchemy-cubrid/issues/1037)) ([3184d9b](https://github.com/cubrid-lab/sqlalchemy-cubrid/commit/3184d9b462bae6e2dd50d187e33abf83f44e5775)), closes [#1011](https://github.com/cubrid-lab/sqlalchemy-cubrid/issues/1011)
+
 ## [1.11.4](https://github.com/cubrid-lab/sqlalchemy-cubrid/compare/v1.11.3...v1.11.4) (2026-10-24)
 
 

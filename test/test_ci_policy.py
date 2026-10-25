@@ -714,3 +714,17 @@ def test_release_repeats_the_ci_endpoint_cell_steps(name: str) -> None:
         for c in json.loads(match["other"])["include"]
     ]
     assert sorted(full_step["if"].split(" || ")) == sorted(cells)
+
+
+def test_upstream_canary_created_issue_enters_triage() -> None:
+    """GITHUB_TOKEN issue creation cannot rely on the issue-opened workflow."""
+    report = workflow("upstream-canary.yml")["jobs"]["report"]
+    script = next(
+        step["run"] for step in report["steps"] if "gh issue create" in step.get("run", "")
+    )
+    create_command = script.split("gh issue create", 1)[1]
+    assert "--label ci" in create_command
+    assert '--label "status: needs triage"' in create_command
+    # Priority and size are maintainer triage decisions, never set by the bot.
+    assert "priority:" not in create_command
+    assert "size:" not in create_command

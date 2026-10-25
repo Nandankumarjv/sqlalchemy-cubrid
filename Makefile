@@ -51,9 +51,9 @@ help: ## Show this help message, grouped by purpose
 		/^##@ / {printf "\n\033[1m%s\033[0m\n", substr($$0, 5)} \
 		/^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-install: ## Install in development mode with the dev dependency group (pip >= 25.1)
+install: ## Install in development mode with the pycubrid driver and the dev dependency group (pip >= 25.1)
 	pip install --upgrade "pip>=25.1"
-	pip install -e . --group dev
+	pip install -e ".[pycubrid]" --group dev
 	$(PRE_COMMIT) install
 
 # Every tool is checked before the verdict, so one run lists everything missing.
@@ -110,8 +110,6 @@ agent-eval-check: ## Validate the agent-evals tasks and re-grade their fixtures 
 
 ##@ Tests (offline; no Docker, no database)
 
-verify: check test ## Run check, then the complete offline suite (no Docker)
-
 # Offline test lanes (#594). `repo` marks repository-tooling tests (Makefile
 # recipes, signal handling, repo scripts; see REPO_TOOLING_MODULES in
 # test/conftest.py). CI runs the fast and repository-tooling lanes as required jobs.
@@ -154,6 +152,28 @@ test-all: ## Run tests across all Python versions via tox
 	tox
 
 ##@ Integration (Docker)
+
+# Full verification (#1018): the static gate, the complete offline suite, then the
+# run-owned live lane (INTEGRATION_DRIVER, default pycubrid), which needs Docker and fails
+# when CUBRID never becomes ready or every live test skips. scripts/run_verify.py runs the
+# phases one after another (never as prerequisites, so even `make -j` starts each one only
+# after the previous one succeeded), forwards a signal to the running phase and then always
+# writes VERIFY_RESULTS/summary.json with the lanes' JUnit files and the live
+# environment.json (#1020). `exec` makes it the recipe's only process, so make's signals
+# reach it. VERIFY_MAKE is $(MAKE) under another name: a recipe line that names $(MAKE)
+# would run even under `make -n`, which must write nothing.
+VERIFY_RESULTS = test-results/verify
+VERIFY_MAKE = $(MAKE)
+verify: ## Full verification: check, the offline suite, then the live integration lane (needs Docker); writes test-results/verify/
+	@for dir in "$(VERIFY_RESULTS)" "$(TEST_RESULTS)" "$(INTEGRATION_RESULTS)"; do \
+		case "$$dir" in ""|.|./|..|../|/) \
+			echo "ERROR: refusing to use results directory '$$dir'" >&2; exit 2;; esac; \
+	done
+	rm -rf -- "$(VERIFY_RESULTS)" "$(TEST_RESULTS)" "$(INTEGRATION_RESULTS)"
+	@exec $(PYTHON) scripts/run_verify.py --make "$(VERIFY_MAKE)" \
+		--results-dir "$(VERIFY_RESULTS)" \
+		--test-results "$(TEST_RESULTS)" \
+		--integration-results "$(INTEGRATION_RESULTS)"
 
 # scripts/run_integration.py owns driver validation, the run-owned Compose project,
 # ownership checks, readiness, signal handling, cleanup and the exit status. `exec`
